@@ -5,6 +5,12 @@ from pprint import pprint
 from lxml import etree
 from recipe_templater import generate_meta_yaml
 
+# Import and set logger
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 # Connect to Mongo
 client = MongoClient()
 db = client.bioconductor_packages
@@ -82,4 +88,4 @@ for namespace in namespaces:
             "state": "NEW"
         })
         i += 1
-        print("Generated package:" + package_name)
+        logger.info("Generated package:" + package_name)

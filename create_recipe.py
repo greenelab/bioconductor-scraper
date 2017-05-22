@@ -9,9 +9,16 @@ from dependency_lookup import UnknownDependency
 from cran_scraper import scrape_cran_package
 from pprint import pprint
 
+# Import and set logger
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 def add_dependencies_to_package(package_name, dependencies):
-    print("Adding dependencies to: " + package_name)
+    logger.info("Adding dependencies:")
+    pprint(dependencies)
+    logger.info("To package: " + package_name)
     client = MongoClient()
     db = client.bioconductor_packages
     packages = db.packages
@@ -72,9 +79,13 @@ def remove_weird_quotes(line):
 
 
 def handle_build_errors(package_name, error_message, full_errors):
+    """Handles errors output via standard out. Basically just trying
+    different patterns that have been observed to be output by
+    `conda build`. The errors are resolved by adding dependencies to
+    packages or updating the versions of dependencies."""
     error_message = remove_weird_quotes(error_message)
 
-    print("Handling stderr error: " + error_message)
+    logger.info("Handling stderr error: " + error_message)
 
     pattern = r"ERROR: lazy loading failed for package (.*)"
     error_match = re.match(pattern, error_message)
@@ -84,6 +95,14 @@ def handle_build_errors(package_name, error_message, full_errors):
             line = remove_weird_quotes(line)
 
             pattern = r"  namespace (.*?) (.*?) is already loaded, but >= (.*?) is required"
+            line_match = re.match(pattern, line)
+            if line_match is not None:
+                add_dependencies_to_package(package_name,
+                                            [{"name": line_match.group(1),
+                                              "version": line_match.group(3)}])
+                return True
+
+            pattern = r"Error : package (.*?) (.*?) is loaded, but >= (.*?) is required by .*"
             line_match = re.match(pattern, line)
             if line_match is not None:
                 add_dependencies_to_package(package_name,
@@ -130,7 +149,7 @@ def handle_build_errors(package_name, error_message, full_errors):
             pattern = r"Error : This is R (.*?), package (.*?) needs >= (.*)"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                print("Caught an R version error.")
+                logger.info("Caught an R version error.")
                 r_version = line_match.group(3)
                 # Probably temporary workaround until conda-forge uploads r-base 3.4
                 if r_version == "3.4":
@@ -140,25 +159,26 @@ def handle_build_errors(package_name, error_message, full_errors):
                 # return build_package_and_deps(package_name)
                 return True
 
-    # I've seen both this and the one like it above. Not sure why the difference.
-    # error_message = "ERROR: this R is version 3.3.2, package 'DelayedArray' requires R >=  3.4"
-    # error_message = "ERROR: this R is version 3.3.2, package 'AnnotationFilter' requires R  >= 3.4.0"
+    # Conda will output 'R >= 3.3.3' with different spacing.... i.e.:
+    # 'R  >= 3.3.3' or 'R >=  3.3.3'
     pattern = r"ERROR: this R is version (.*?), package '(.*?)' requires R  >= (.*)"
     error_match = re.match(pattern, error_message)
     if error_match is None:
         pattern = r"ERROR: this R is version (.*?), package '(.*?)' requires R >=  (.*)"
         error_match = re.match(pattern, error_message)
-    # pprint(error_match.groups())
+
+    if error_match is None:
+        pattern = r"ERROR: this R is version (.*?), package '(.*?)' requires R >= (.*)"
+        error_match = re.match(pattern, error_message)
+
     if error_match is not None:
-        print("Caught an R version error.")
+        logger.info("Caught an R version error.")
         r_version = error_match.group(3)
         # Probably temporary workaround until conda-forge uploads r-base 3.4
         if r_version == "3.4":
             r_version = "3.4.0"
 
-        # change_dependency_version(package_name, "r-base", r_version)
         change_dependency_version(error_match.group(2), "r-base", r_version)
-        # return build_package_and_deps(package_name)
         return True
 
     # Conda likes to pluralize error messages correctly, makes parsing them annoying.
@@ -176,15 +196,15 @@ def handle_build_errors(package_name, error_message, full_errors):
         for dep in missing_deps:
             dep_objects.append({"name": dep})
 
-        print("Adding dependencies:")
+        logger.info("Adding dependencies:")
         pprint(dep_objects)
-        print("To package: " + package_name)
+        logger.info("To package: " + package_name)
         deps_handled = add_or_build_dependencies(package_name, dep_objects)
 
         needy_package_name = error_match.group(2)
         if deps_handled and package_name != needy_package_name:
-            print(("Package {0} depends on {1} which seems to need to be rebuilt."
-                   " Recurring to do so.").format(package_name, needy_package_name))
+            logger.info(("Package {0} depends on {1} which seems to need to be rebuilt."
+                         " Recurring to do so.").format(package_name, needy_package_name))
             return build_package_and_deps(needy_package_name)
         else:
             return deps_handled
@@ -192,7 +212,32 @@ def handle_build_errors(package_name, error_message, full_errors):
     return False
 
 
+def build_dependency(package_name, dependency_object):
+    client = MongoClient()
+    db = client.bioconductor_packages
+    packages = db.packages
+    dependency_name = dependency_object["name"]
+
+    if dependency_object["state"] != "FAILED":
+        logger.info("Recurring to build dependency: {}".format(dependency_name))
+        return build_package_and_deps(dependency_name)
+    else:
+        logger.error("Dependency %s failed, so %s must fail as well.",
+                     dependency_name,
+                     package_name)
+        packages.update_one(
+            {"name": package_name},
+            {"$set": {"state": "FAILED"}}
+        )
+        return False
+
+
 def handle_stdout_errors(package_name, stdout_string):
+    """This function is a bit of a mess but there are several types
+    of errors which can be contained in standard out.
+    The strategy is to loop through it once and determine what kind of
+    error there is, then loop through it again to parse out the error
+    details so that they can be corrected."""
     client = MongoClient()
     db = client.bioconductor_packages
     packages = db.packages
@@ -204,6 +249,14 @@ def handle_stdout_errors(package_name, stdout_string):
     specification_conflict_line = -1
     help_message_line_index = -1
     for i, line in enumerate(output_lines):
+        # if line.find("unsatisfiable dependencies") != -1:
+        #     packages.update_one(
+        #         {"name": package_name},
+        #         {"$set": {"state": "FAILED"}}
+        #     )
+        #     # Can't fix this.
+        #     return True
+
         if line.find("missing in current linux-64 channels:") != -1:
             build_error = True
             missing_packages_line_index = i
@@ -224,7 +277,7 @@ def handle_stdout_errors(package_name, stdout_string):
             help_message_line_index = i
 
     if missing_packages_line_index == -1 and specification_conflict_line == -1:
-        print("No error in stdout.")
+        logger.info("No error in stdout.")
 
     if missing_packages_line_index != -1:
         start_index = missing_packages_line_index + 1  # don't include the message itself
@@ -235,40 +288,43 @@ def handle_stdout_errors(package_name, stdout_string):
                 dependency_name_lower = line.replace("  - bioconductor-", "")
                 # If conda outputs a dependency chain like:
                 # bioconductor-dnacopy -> r 3.2.2*
-                # Then we just want to check for "dnacopy", not "dnacopy -> 3 3.2.2*"
+                # Then we just want to check for "dnacopy", not "dnacopy -> r 3.2.2*"
                 dependency_name_lower = dependency_name_lower.split(" ")[0]
                 dependency_object = packages.find_one({"lower_name": dependency_name_lower})
                 if dependency_object is not None:
-                    dependency_name = dependency_object["name"]
-                    print("Recurring to build dependency: {}".format(dependency_name))
-                    build_package_and_deps(dependency_name)
+                    build_dependency(package_name, dependency_object)
+                    # dependency_name = dependency_object["name"]
+                    # logger.info("Recurring to build dependency: {}".format(dependency_name))
+                    # build_package_and_deps(dependency_name)
                 else:
-                    print("Unknown dependency: {}".format(line))
+                    logger.info("Unknown dependency: {}".format(line))
                     raise UnknownDependency(line)
             elif line.find("cran-") != -1:
                 dependency_name_lower = line.replace("  - cran-", "")
                 dependency_object = packages.find_one({"lower_name": dependency_name_lower})
                 if dependency_object is not None:
-                    dependency_name = dependency_object["name"]
-                    print("Recurring to build dependency: {}".format(dependency_name))
-                    build_package_and_deps(dependency_name)
+                    build_dependency(package_name, dependency_object)
+                    # dependency_name = dependency_object["name"]
+                    # logger.info("Recurring to build dependency: {}".format(dependency_name))
+                    # build_package_and_deps(dependency_name)
                 else:
-                    print("Unknown dependency: {}".format(line))
+                    logger.info("Unknown dependency: {}".format(line))
                     raise UnknownDependency(line)
             else:
-                print("Unknown dependency: {}".format(line))
+                logger.info("Unknown dependency: {}".format(line))
                 raise UnknownDependency
 
     elif specification_conflict_line != -1:
         package_record = packages.find_one({"name": package_name})
         if package_record["state"] == "TRIED":
-            return False
+            logger.info(("Already tried to fix this specification"
+                         " error for package {}").format(package_name))
+            packages.update_one({"name": package_name}, {"$set": {"state": "FAILED"}})
+            return True
         else:
-            print(("Already tried to fix this specification"
-                   " error for package {}").format(package_name))
             packages.update_one({"name": package_name}, {"$set": {"state": "TRIED"}})
 
-        print("Handling specification conflict error.")
+        logger.info("Handling specification conflict error.")
         start_index = specification_conflict_line + 1  # don't include the message itself
         package_conflict_lines = output_lines[start_index:help_message_line_index]
 
@@ -277,24 +333,50 @@ def handle_stdout_errors(package_name, stdout_string):
             version_specication_pattern = r".* >=.*"
             version_match = re.match(version_specication_pattern, line)
             if version_match is None:
-                print("Trying to handle a specification conflict for:")
-                print(line)
-                # handle cran or bioconductor
+                logger.info("Trying to handle a specification conflict for:")
+                logger.info(line)
                 dependency_name_lower = line.replace("  - bioconductor-", "")
                 dependency_name_lower = dependency_name_lower.replace("  - r-", "")
-                # and until there's no more cran prefixed packages around.
-                # REMOVE ME!!!!!!!!
                 dependency_name_lower = dependency_name_lower.replace("  - cran-", "")
                 dependency_name_lower = dependency_name_lower.split(" ")[0]
 
                 dependency_object = packages.find_one({"lower_name": dependency_name_lower})
                 if dependency_object is not None:
                     dependency_name = dependency_object["name"]
-                    print("Recurring to build dependency: {}".format(dependency_name))
+                    logger.info("Recurring to build dependency: {}".format(dependency_name))
                     build_package_and_deps(dependency_name)
                 else:
-                    print("Unknown dependency: {}".format(line))
+                    logger.info("Unknown dependency: {}".format(line))
                     raise UnknownDependency(line)
+
+    return build_error
+
+
+def catch_and_handle_errors(package_name, stderr, stdout):
+    """Determine if an error is in standard error, if it is, handle it.
+    Otherwise handle standard out errors."""
+    dependency_error = None
+    build_error = False
+    for line in stderr.split("\n"):
+        if (line.find("ERROR: dep") != -1 or line.find("ERROR: lazy") != -1
+                or line.find("ERROR: this") != -1):
+            build_error = True
+            dependency_error = line
+
+    if dependency_error is not None:
+        if handle_build_errors(package_name, dependency_error, stderr):
+            logger.info(("Tried to handle build errors,"
+                         " rebuilding package {}.").format(package_name))
+            success = build_package_and_deps(package_name, False)
+            logger.info("Rebuilding package {0} returned {1}".format(package_name, success))
+            build_error = not success
+    else:
+        if handle_stdout_errors(package_name, stdout):
+            logger.info(("Tried to handle stdout errors,"
+                         " rebuilding package {}.").format(package_name))
+            success = build_package_and_deps(package_name, False)
+            logger.info("Rebuilding package {0} returned {1}".format(package_name, success))
+            build_error = not success
 
     return build_error
 
@@ -321,18 +403,42 @@ def build_cran_package(name):
     return False
 
 
+def run_conda_build(full_package_name):
+    channels_string = build_channels_string()
+    build_command = "conda build {channels}recipes/{package_name}".format(
+        channels=channels_string,
+        package_name=full_package_name
+    )
+    logger.info("Executing build command:")
+    logger.info(build_command)
+    process = subprocess.Popen(build_command.split(),
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    error_string = stderr.decode("utf-8", "ignore")
+    with open("stderr.txt", "a") as stderr_file:
+        stderr_file.write(error_string)
+
+    output_string = stdout.decode("utf-8")
+    with open("stdout.txt", "a") as stdout_file:
+        stdout_file.write(output_string)
+
+    return (output_string, error_string)
+
+
 def build_package_and_deps(name, destroy_work_dir=True, prefix="bioconductor-"):
     # Connect to Mongo
     client = MongoClient()
     db = client.bioconductor_packages
     packages = db.packages
 
-    print("Building package {0}.".format(name))
+    logger.info("Building package {0}.".format(name))
     package_record = packages.find_one({"name": name})
 
     # Check for packages that we can't build.
     if package_record["state"] == "FAILED":
-        print("Can't build package {}, it has failed in the past.".format(name))
+        logger.info("Can't build package {}, it has failed in the past.".format(name))
         return False
 
     if "source" in package_record and package_record["source"] == "cran":
@@ -355,71 +461,28 @@ def build_package_and_deps(name, destroy_work_dir=True, prefix="bioconductor-"):
 
     # Workaround for: https://github.com/conda/conda-build/issues/2024
     if destroy_work_dir:
-        print("Destroying the work dir.")
+        logger.info("Destroying the work dir.")
         shutil.rmtree("/home/kurt/miniconda3/conda-bld/work", ignore_errors=True)
 
-    channels_string = build_channels_string()
-    # build_command = "conda build --no-build-id {channels}recipes/{package_name}".format(
-    build_command = "conda build {channels}recipes/{package_name}".format(
-        channels=channels_string,
-        package_name=full_package_name
-    )
-    print("Executing build command:")
-    print(build_command)
-    process = subprocess.Popen(build_command.split(),
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
+    output_string, error_string = run_conda_build(full_package_name)
 
-    dependency_error = None
-    error_string = stderr.decode("utf-8", "ignore")
-    # print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    # print(error_string)
-    # print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    with open("stderr.txt", "a") as stderr_file:
-        stderr_file.write(error_string)
-
-    output_string = stdout.decode("utf-8")
-    with open("stdout.txt", "a") as stdout_file:
-        stdout_file.write(output_string)
-
-    for line in error_string.split("\n"):
-        if (line.find("ERROR: dep") != -1 or line.find("ERROR: lazy") != -1
-                or line.find("ERROR: this") != -1):
-            build_error = True
-            dependency_error = line
-
-    if dependency_error is not None:
-        if handle_build_errors(name, dependency_error, error_string):
-            print("Tried to handle build errors, rebuilding package {}.".format(name))
-            success = build_package_and_deps(name, False)
-            print("Rebuilding package {0} returned {1}".format(name, success))
-            build_error = not success
-    else:
-        if handle_stdout_errors(name, output_string):
-            print("Tried to handle stdout errors, rebuilding package {}.".format(name))
-            success = build_package_and_deps(name, False)
-            print("Rebuilding package {0} returned {1}".format(name, success))
-            build_error = not success
+    build_error = catch_and_handle_errors(name, error_string, output_string)
 
     if build_error:
-        print("There was a build error for package {}.".format(name))
-        print(error_string)
+        logger.info("There was a build error for package {}.".format(name))
+        logger.info(error_string)
         packages.update_one(
             {"name": name},
             {"$set": {"state": "FAILED"}}
         )
         return False
     else:
-        print("There was no build error for package: {0}".format(name))
+        logger.info("There was no build error for package: {0}".format(name))
         packages.update_one(
             {"name": name},
             {"$set": {"state": "DONE"}}
         )
         return True
-
-
-# build_package_and_deps("pd.081229.hg18.promoter.medip.hx1")
 
 
 def main():

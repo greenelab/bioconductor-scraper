@@ -3,6 +3,12 @@ from pymongo import MongoClient
 from pprint import pprint
 from cran_scraper import scrape_cran_package
 
+# Import and set logger
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 ANACONDA_URL_BASE = "https://anaconda.org/r/r-"
 
 client = MongoClient()
@@ -50,7 +56,6 @@ def get_dependency_string(dep_object):
 
     package_record = packages.find_one({"name": dep_name})
     if package_record is not None:
-        # pprint(package_record)
         if "source" in package_record and package_record["source"] == "cran":
             return start_string + "cran-" + dep_name.lower() + end_string
         else:
@@ -59,6 +64,6 @@ def get_dependency_string(dep_object):
     if scrape_cran_package(dep_name):
         return start_string + "cran-" + dep_name.lower() + end_string
 
-    print("Cannot find dependency:")
+    logger.error("Cannot find dependency:")
     pprint(dep_object)
     raise UnknownDependency(dep_object["name"])

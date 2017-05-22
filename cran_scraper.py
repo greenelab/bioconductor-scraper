@@ -2,12 +2,18 @@ import requests
 from pymongo import MongoClient, DESCENDING
 from lxml import etree
 
+# Import and set logger
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 CRAN_URL_TEMPLATE = "https://cran.r-project.org/web/packages/{}/index.html"
 SOURCE_URL_BASE = "https://cran.r-project.org/src/contrib/"
 
 
 def scrape_cran_package(name):
-    print("Scraping cran package: " + name)
+    logger.info("Scraping cran package: " + name)
     # Connect to Mongo
     client = MongoClient()
     db = client.bioconductor_packages
@@ -16,7 +22,7 @@ def scrape_cran_package(name):
     url = CRAN_URL_TEMPLATE.format(name)
     request = requests.get(url)
     if request.status_code != 200:
-        print("Cran returned non-200 status code for package: " + name)
+        logger.error("Cran returned non-200 status code for package: " + name)
         return False
 
     html = request.text
