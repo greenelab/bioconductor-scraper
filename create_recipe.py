@@ -43,6 +43,12 @@ def add_or_build_dependencies(package_name, missing_deps):
     existing_deps = package_object["dependencies"]
     dep_objects = []
     for dep in missing_deps:
+        dep_package = packages.find_one({"name": dep["name"]})
+        if dep_package is not None and dep_package["state"] == "FAILED":
+            logger.error("Dependency %s has failed before, not adding it to %s.",
+                         dep["name"],
+                         package_name)
+            return False
         if len(list(filter(lambda d: d["name"] == dep["name"], existing_deps))) > 0:
             # The dependency is already listed for the package, let's try building it.
             success = success and build_package_and_deps(dep["name"])
@@ -94,54 +100,47 @@ def handle_build_errors(package_name, error_message, full_errors):
             pattern = r"  namespace (.*?) (.*?) is already loaded, but >= (.*?) is required"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                add_dependencies_to_package(package_name,
-                                            [{"name": line_match.group(1),
-                                              "version": line_match.group(3)}])
-                return True
+                return add_dependencies_to_package(package_name,
+                                                   [{"name": line_match.group(1),
+                                                     "version": line_match.group(3)}])
 
             pattern = r"Error : package (.*?) (.*?) is loaded, but >= (.*?) is required by .*"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                add_dependencies_to_package(package_name,
-                                            [{"name": line_match.group(1),
-                                              "version": line_match.group(3)}])
-                return True
+                return add_dependencies_to_package(package_name,
+                                                   [{"name": line_match.group(1),
+                                                     "version": line_match.group(3)}])
 
             pattern = r"Error : package (.*?) (.*?) was found, but >= (.*?) is required by .*"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                add_or_build_dependencies(package_name,
-                                          [{"name": line_match.group(1),
-                                            "version": line_match.group(3)}])
-                return True
+                return add_or_build_dependencies(package_name,
+                                                 [{"name": line_match.group(1),
+                                                   "version": line_match.group(3)}])
 
             pattern = r"Error: package or namespace load failed for (.*?):"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                add_or_build_dependencies(package_name,
-                                          [{"name": line_match.group(1)}])
-                return True
+                return add_or_build_dependencies(package_name,
+                                                 [{"name": line_match.group(1)}])
 
             pattern = r"  there is no package called (.*)"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                add_or_build_dependencies(package_name,
-                                          [{"name": line_match.group(1)}])
-                return True
+                return add_or_build_dependencies(package_name,
+                                                 [{"name": line_match.group(1)}])
 
             pattern = r"Error : package (.*?) required by (.*?) could not be found"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                add_or_build_dependencies(package_name,
-                                          [{"name": line_match.group(1)}])
-                return True
+                return add_or_build_dependencies(package_name,
+                                                 [{"name": line_match.group(1)}])
 
             pattern = r"Error : package (.*?) could not be loaded"
             line_match = re.match(pattern, line)
             if line_match is not None:
-                add_or_build_dependencies(package_name,
-                                          [{"name": line_match.group(1)}])
-                return True
+                return add_or_build_dependencies(package_name,
+                                                 [{"name": line_match.group(1)}])
 
             pattern = r"Error : This is R (.*?), package (.*?) needs >= (.*)"
             line_match = re.match(pattern, line)
