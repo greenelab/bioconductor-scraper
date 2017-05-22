@@ -51,7 +51,6 @@ for namespace in namespaces:
             elif column.text == "License":
                 license_column = column
 
-        # href = package_source_column.getnext().getchildren()[0].attrib["href"]
         version = version_column.getnext().text
         license_code = license_column.getnext().text
 
