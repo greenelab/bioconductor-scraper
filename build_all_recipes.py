@@ -31,14 +31,12 @@ def get_next_package():
 
 
 package_to_build = get_next_package()
-last_build_success = True
 
 while(True):
     try:
         last_build_success = build_package_and_deps(package_to_build["name"])
     except UnknownDependency as e:
-        # last_build_success = False
-        message, = e.args
+        message = e.args
         packages.update_one(
             {"name": package_to_build["name"]},
             {"$set": {"state": "FAILED"}}
