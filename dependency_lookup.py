@@ -1,5 +1,5 @@
 import requests
-from pymongo import MongoClient
+from mongo_singleton import mongo
 from pprint import pprint
 from cran_scraper import scrape_cran_package
 
@@ -11,8 +11,7 @@ logger = logging.getLogger(__name__)
 
 ANACONDA_URL_BASE = "https://anaconda.org/r/r-"
 
-client = MongoClient()
-db = client.bioconductor_packages
+db = mongo.bioconductor_packages
 packages = db.packages
 dep_lookup = db.dependency_lookup
 

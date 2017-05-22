@@ -1,5 +1,6 @@
 import requests
-from pymongo import MongoClient, DESCENDING
+from pymongo import DESCENDING
+from mongo_singleton import mongo
 from lxml import etree
 
 # Import and set logger
@@ -15,8 +16,7 @@ SOURCE_URL_BASE = "https://cran.r-project.org/src/contrib/"
 def scrape_cran_package(name):
     logger.info("Scraping cran package: " + name)
     # Connect to Mongo
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     packages = db.packages
 
     url = CRAN_URL_TEMPLATE.format(name)

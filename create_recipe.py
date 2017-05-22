@@ -1,7 +1,7 @@
 import os
 import re
 import shutil
-from pymongo import MongoClient
+from mongo_singleton import mongo
 import argparse
 import subprocess
 from recipe_templater import generate_meta_yaml
@@ -19,8 +19,7 @@ def add_dependencies_to_package(package_name, dependencies):
     logger.info("Adding dependencies:")
     pprint(dependencies)
     logger.info("To package: " + package_name)
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     packages = db.packages
 
     package_object = packages.find_one({"name": package_name})
@@ -37,8 +36,7 @@ def add_or_build_dependencies(package_name, missing_deps):
     """For each dependency in missing_deps: if dependency already exists on package,
     build the dependency. Otherwise just add it to the package's dependencies."""
     success = True
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     packages = db.packages
 
     package_object = packages.find_one({"name": package_name})
@@ -59,8 +57,7 @@ def add_or_build_dependencies(package_name, missing_deps):
 
 
 def change_dependency_version(package_name, dependency_package, new_version):
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     packages = db.packages
 
     package_object = packages.find_one({"name": package_name})
@@ -156,7 +153,6 @@ def handle_build_errors(package_name, error_message, full_errors):
                     r_version = "3.4.0"
 
                 change_dependency_version(package_name, "r-base", r_version)
-                # return build_package_and_deps(package_name)
                 return True
 
     # Conda will output 'R >= 3.3.3' with different spacing.... i.e.:
@@ -213,8 +209,7 @@ def handle_build_errors(package_name, error_message, full_errors):
 
 
 def build_dependency(package_name, dependency_object):
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     packages = db.packages
     dependency_name = dependency_object["name"]
 
@@ -238,8 +233,7 @@ def handle_stdout_errors(package_name, stdout_string):
     The strategy is to loop through it once and determine what kind of
     error there is, then loop through it again to parse out the error
     details so that they can be corrected."""
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     packages = db.packages
     build_error = False
     output_lines = stdout_string.split("\n")
@@ -249,14 +243,6 @@ def handle_stdout_errors(package_name, stdout_string):
     specification_conflict_line = -1
     help_message_line_index = -1
     for i, line in enumerate(output_lines):
-        # if line.find("unsatisfiable dependencies") != -1:
-        #     packages.update_one(
-        #         {"name": package_name},
-        #         {"$set": {"state": "FAILED"}}
-        #     )
-        #     # Can't fix this.
-        #     return True
-
         if line.find("missing in current linux-64 channels:") != -1:
             build_error = True
             missing_packages_line_index = i
@@ -293,9 +279,6 @@ def handle_stdout_errors(package_name, stdout_string):
                 dependency_object = packages.find_one({"lower_name": dependency_name_lower})
                 if dependency_object is not None:
                     build_dependency(package_name, dependency_object)
-                    # dependency_name = dependency_object["name"]
-                    # logger.info("Recurring to build dependency: {}".format(dependency_name))
-                    # build_package_and_deps(dependency_name)
                 else:
                     logger.info("Unknown dependency: {}".format(line))
                     raise UnknownDependency(line)
@@ -304,9 +287,6 @@ def handle_stdout_errors(package_name, stdout_string):
                 dependency_object = packages.find_one({"lower_name": dependency_name_lower})
                 if dependency_object is not None:
                     build_dependency(package_name, dependency_object)
-                    # dependency_name = dependency_object["name"]
-                    # logger.info("Recurring to build dependency: {}".format(dependency_name))
-                    # build_package_and_deps(dependency_name)
                 else:
                     logger.info("Unknown dependency: {}".format(line))
                     raise UnknownDependency(line)
@@ -382,15 +362,14 @@ def catch_and_handle_errors(package_name, stderr, stdout):
 
 
 def build_channels_string():
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     dep_lookup = db.dependency_lookup
 
     channels_set = set()
     for lookup in dep_lookup.find():
         channels_set.add(lookup["channel"])
 
-    channels_string = "-c kurtwheeler "
+    channels_string = ""
     for channel in channels_set:
         channels_string += "-c {} ".format(channel)
 
@@ -428,9 +407,7 @@ def run_conda_build(full_package_name):
 
 
 def build_package_and_deps(name, destroy_work_dir=True, prefix="bioconductor-"):
-    # Connect to Mongo
-    client = MongoClient()
-    db = client.bioconductor_packages
+    db = mongo.bioconductor_packages
     packages = db.packages
 
     logger.info("Building package {0}.".format(name))

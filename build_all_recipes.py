@@ -1,5 +1,6 @@
 import os
-from pymongo import MongoClient, ASCENDING
+from pymongo import ASCENDING
+from mongo_singleton import mongo
 from create_recipe import build_package_and_deps
 from dependency_lookup import UnknownDependency
 
@@ -10,13 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 # Connect to Mongo
-client = MongoClient()
-db = client.bioconductor_packages
+db = mongo.bioconductor_packages
 packages = db.packages
 dep_lookup = db.dependency_lookup
-
-
-DEPENDENCY_LOOKUP_POPULATOR = "dep_lookup.py"
 
 # Reset log files
 try:
@@ -27,23 +24,6 @@ try:
     os.remove("stdout.txt")
 except OSError:
     pass
-
-
-def add_dep_lookup(r_name, conda_name, channel):
-    logger.info(("Adding package with r_name of {r_name}, conda_name of {conda_name}, "
-                 "and a channel  of {channel} to dependency lookup.").format(r_name=r_name,
-                                                                             conda_name=conda_name,
-                                                                             channel=channel))
-    dep_lookup.insert_one({"r_name": r_name, "conda_name": conda_name, "channel": channel})
-
-    # To make this portable-ish, save dependencies which have been figured
-    # out to a file so a different mongo db could be populated with them.
-    line = ('dep_lookup.insert_one({{"r_name": "{r_name}", "conda_name":'
-            ' "{conda_name}", "channel": "{channel}"}})\n').format(r_name=r_name,
-                                                                   conda_name=conda_name,
-                                                                   channel=channel)
-    with open(DEPENDENCY_LOOKUP_POPULATOR, "a") as dep_file:
-        dep_file.write(line)
 
 
 def get_next_package():

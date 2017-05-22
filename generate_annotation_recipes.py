@@ -1,9 +1,10 @@
-import os
+"""This script scrapes bioconductor.org for packages and inserts
+them into the bioconductor_packages.packages collection."""
+
 import requests
 from pymongo import MongoClient
 from pprint import pprint
 from lxml import etree
-from recipe_templater import generate_meta_yaml
 
 # Import and set logger
 import logging
@@ -38,11 +39,6 @@ for namespace in namespaces:
 
     for row in table:
         package_name = row["Package"]
-
-        # Too many packages to do them all at once, only doin pd.* for now.
-        # if package_name[0:3] != "pd.":
-        #     continue
-
         package_url = PACKAGE_URL_TEMPLATE.format(namespace=namespace, package_name=package_name)
         package_html = requests.get(package_url).text
         parsed_html = etree.HTML(package_html)
@@ -65,15 +61,6 @@ for namespace in namespaces:
             paragraph_text = paragraph.text
             if paragraph_text and "Maintainer" in paragraph_text:
                 maintainer_text = paragraph_text
-
-        # os.makedirs("recipes/{0}".format(package_name), exist_ok=True)
-        # generate_meta_yaml(
-        #     package_name,
-        #     version,
-        #     SOURCE_URL_BASE,
-        #     package_url,
-        #     license_code
-        # )
 
         packages.insert_one({
             "name": package_name,
