@@ -55,6 +55,7 @@ for namespace in namespaces:
         license_code = license_column.getnext().text
 
         paragraphs = parsed_html.findall(".//p")
+        summary_text = paragraphs[4].text  # brittle, but there's no way to identify it for sure.
         maintainer_text = ""
         for paragraph in paragraphs:
             paragraph_text = paragraph.text
@@ -68,6 +69,7 @@ for namespace in namespaces:
             "home_url": package_url,
             "source_url_base": SOURCE_URL_BASE.format(namespace=namespace),
             "license_code": license_code,
+            "summary": summary_text,
             "dependencies": [{"name": "r-base", "version": "3.3.2"}],
             "priority": i,
             "maintainer": maintainer_text,

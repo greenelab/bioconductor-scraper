@@ -24,7 +24,6 @@ def populate_lookup_table():
     dep_lookup.insert_one(
         {"r_name": "RSQLite", "conda_name": "r-rsqlite", "channel": "conda-forge"})
     dep_lookup.insert_one({"r_name": "DBI", "conda_name": "r-dbi", "channel": "conda-forge"})
-    dep_lookup.insert_one({"r_name": "ff", "conda_name": "r-ff", "channel": "Terradue"})
     dep_lookup.insert_one(
         {"r_name": "foreach", "conda_name": "r-foreach", "channel": "conda-forge"})
 

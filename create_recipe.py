@@ -118,6 +118,12 @@ def handle_build_errors(package_name, error_message, full_errors):
                                                  [{"name": line_match.group(1),
                                                    "version": line_match.group(3)}])
 
+            pattern = r"Error : \.onLoad failed in loadNamespace\(\) for '(.*?)', details:"
+            line_match = re.match(pattern, line)
+            if line_match is not None:
+                return add_or_build_dependencies(package_name,
+                                                 [{"name": line_match.group(1)}])
+
             pattern = r"Error: package or namespace load failed for (.*?):"
             line_match = re.match(pattern, line)
             if line_match is not None:
@@ -341,6 +347,8 @@ def catch_and_handle_errors(package_name, stderr, stdout):
                 or line.find("ERROR: this") != -1):
             build_error = True
             dependency_error = line
+        elif line.find("ERROR: compilation") != -1:
+            return True
 
     if dependency_error is not None:
         if handle_build_errors(package_name, dependency_error, stderr):
@@ -429,6 +437,7 @@ def build_package_and_deps(name, destroy_work_dir=True, prefix="bioconductor-"):
         package_record["source_url_base"],
         package_record["home_url"],
         package_record["license_code"],
+        package_record["summary"],
         package_record["dependencies"],
         prefix
     )
