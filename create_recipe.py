@@ -287,6 +287,15 @@ def handle_stdout_errors(package_name, stdout_string):
                 else:
                     logger.info("Unknown dependency: {}".format(line))
                     raise UnknownDependency(line)
+            elif line.find("r-") != -1:
+                dependency_name_lower = line.replace("  - r-", "")
+                dependency_object = packages.find_one({"lower_name": dependency_name_lower})
+                if dependency_object is not None:
+                    build_dependency(package_name, dependency_object)
+                else:
+                    logger.info("Unknown dependency: {}".format(line))
+                    raise UnknownDependency(line)
+            # Continue supporting cran- named packages until rerunning from beginning
             elif line.find("cran-") != -1:
                 dependency_name_lower = line.replace("  - cran-", "")
                 dependency_object = packages.find_one({"lower_name": dependency_name_lower})
@@ -385,7 +394,7 @@ def build_channels_string():
 
 def build_cran_package(name):
     if scrape_cran_package(name):
-        return build_package_and_deps(name, True, "cran-")
+        return build_package_and_deps(name, True, "r-")
     return False
 
 
@@ -426,7 +435,7 @@ def build_package_and_deps(name, destroy_work_dir=True, prefix="bioconductor-"):
         return False
 
     if "source" in package_record and package_record["source"] == "cran":
-        prefix = "cran-"
+        prefix = "r-"
 
     full_package_name = prefix + package_record["lower_name"]
     os.makedirs("recipes/{}".format(full_package_name), exist_ok=True)

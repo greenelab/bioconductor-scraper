@@ -39,6 +39,11 @@ for namespace in namespaces:
 
     for row in table:
         package_name = row["Package"]
+
+        # Too many packages to do them all at once, only doin pd.* for now.
+        if package_name[0:3] != "pd.":
+            continue
+
         package_url = PACKAGE_URL_TEMPLATE.format(namespace=namespace, package_name=package_name)
         package_html = requests.get(package_url).text
         parsed_html = etree.HTML(package_html)

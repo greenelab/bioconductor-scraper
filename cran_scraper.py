@@ -26,7 +26,9 @@ def scrape_cran_package(name):
         return False
 
     html = request.text
-    tables = etree.HTML(html).findall(".//table")
+    parsed_html = etree.HTML(html)
+    tables = parsed_html.findall(".//table")
+    paragraphs = parsed_html.findall(".//p")
 
     package_table = {}
     for table in tables:
@@ -48,6 +50,7 @@ def scrape_cran_package(name):
         "home_url": url,
         "source_url_base": SOURCE_URL_BASE,
         "license_code": package_table["License:"],
+        "summary": paragraphs[0].text,
         # Everything depends on R.
         "dependencies": [{"name": "r-base", "version": "3.3.2"}],
         "priority": priority,

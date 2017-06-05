@@ -55,12 +55,12 @@ def get_dependency_string(dep_object):
     package_record = packages.find_one({"name": dep_name})
     if package_record is not None:
         if "source" in package_record and package_record["source"] == "cran":
-            return start_string + "cran-" + dep_name.lower() + end_string
+            return start_string + "r-" + dep_name.lower() + end_string
         else:
             return start_string + "bioconductor-" + dep_name.lower() + end_string
 
     if scrape_cran_package(dep_name):
-        return start_string + "cran-" + dep_name.lower() + end_string
+        return start_string + "r-" + dep_name.lower() + end_string
 
     logger.error("Cannot find dependency:")
     pprint(dep_object)
